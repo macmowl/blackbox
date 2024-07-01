@@ -10,6 +10,8 @@ export default function GridGeneration() {
   const [shootMode, setShootMode] = useState<boolean>(false);
   const [rayResult, setRayResult] = useState<string | null>(null);
   const [atomCount, setAtomCount] = useState<number>(0);
+  const [markerCount, setMarkerCount] = useState<number>(0);
+  const [validationResult, setValidationResult] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchGameState() {
@@ -48,6 +50,13 @@ export default function GridGeneration() {
       setGrid(newGrid);
       saveGameState(newGrid);
     } else if (shootMode) {
+      const currentMarkers = markerCount + (cell.marker ? -1 : 1);
+      if (currentMarkers > atomCount) {
+        setValidationResult(
+          'You cannot place more markers than there are atoms.'
+        );
+        return;
+      }
       const newGrid = grid.map((r, rowIndex) =>
         r.map((c, colIndex) => {
           if (rowIndex === row && colIndex === col && c.type === 'atomMarker') {
@@ -58,6 +67,7 @@ export default function GridGeneration() {
       );
       setGrid(newGrid);
       saveGameState(newGrid);
+      setMarkerCount(currentMarkers);
     } else {
       if (cell.type === 'atomMarker') {
         if (cell.atom) {
@@ -94,15 +104,20 @@ export default function GridGeneration() {
     let col = startCol;
     let direction: [number, number];
 
-    if (startRow === 0) direction = [1, 0]; // Down
-    else if (startRow === GRID_SIZE + 1) direction = [-1, 0]; // Up
-    else if (startCol === 0) direction = [0, 1]; // Right
-    else direction = [0, -1]; // Left
+    if (startRow === 0) direction = [1, 0]; // Vers le bas
+    else if (startRow === GRID_SIZE + 1) direction = [-1, 0]; // Vers le haut
+    else if (startCol === 0) direction = [0, 1]; // Vers la droite
+    else direction = [0, -1]; // Vers la gauche
 
-    while (true) {
+    const MAX_STEPS = GRID_SIZE * 4; // Limite le nombre de pas pour éviter une boucle infinie
+    let steps = 0;
+
+    while (steps < MAX_STEPS) {
       row += direction[0];
       col += direction[1];
-      if (row < 0 || row >= GRID_SIZE + 1 || col < 0 || col >= GRID_SIZE + 1) {
+      steps += 1;
+
+      if (row < 0 || row > GRID_SIZE + 1 || col < 0 || col > GRID_SIZE + 1) {
         return `Ray exited at (${row}, ${col})`;
       }
 
@@ -111,27 +126,83 @@ export default function GridGeneration() {
         return `Ray reflected back at (${startRow}, ${startCol})`;
       }
 
-      const adjacent = [
-        [row + 1, col - 1], // bottom left
-        [row - 1, col + 1], // top right
-        [row + 1, col + 1], // bottom right
-        [row - 1, col - 1], // top left
+      // Vérifier la présence d'atomes adjacents pour dévier le rayon
+      const adjacentCells = [
+        { pos: [row - 1, col + 1], dir: [-1, 0] }, // Haut
+        { pos: [row + 1, col - 1], dir: [1, 0] }, // Bas
+        { pos: [row - 1, col - 1], dir: [0, 1] }, // Gauche
+        { pos: [row + 1, col + 1], dir: [0, -1] }, // Droite
       ];
 
-      for (let i = 0; i < adjacent.length; i++) {
+      for (const { pos, dir } of adjacentCells) {
+        const [adjRow, adjCol] = pos;
         if (
-          adjacent[i][0] >= 0 &&
-          adjacent[i][0] <= GRID_SIZE + 1 &&
-          adjacent[i][1] >= 0 &&
-          adjacent[i][1] <= GRID_SIZE + 1
+          adjRow >= 0 &&
+          adjRow <= GRID_SIZE + 1 &&
+          adjCol >= 0 &&
+          adjCol <= GRID_SIZE + 1 &&
+          grid[adjRow][adjCol].type === 'atomMarker' &&
+          (grid[adjRow][adjCol] as AtomMarkerCell).atom
         ) {
-          const adjCell = grid[adjacent[i][0]][adjacent[i][1]];
-          if (adjCell.type === 'atomMarker' && adjCell.atom) {
-            direction = [direction[1], direction[0]];
-            break;
+          // Modifier la direction du rayon de 90° en fonction de la position de l'atome adjacent
+          if (direction[0] === 0 && direction[1] === 1) {
+            // vers la droite
+            if (adjRow === row + 1) {
+              direction = [-1, 0];
+            } else {
+              direction = [1, 0];
+            }
+          } else if (direction[0] === 1 && direction[1] === 0) {
+            // vers le bas
+            if (adjCol === col + 1) {
+              direction = [0, -1];
+            } else {
+              direction = [0, 1];
+            }
+          } else if (direction[0] === 0 && direction[1] === -1) {
+            // vers la gauche
+            if (adjRow === row - 1) {
+              direction = [1, 0];
+            } else {
+              direction = [-1, 0];
+            }
+          } else if (direction[0] === -1 && direction[1] === 0) {
+            // vers le haut
+            if (adjCol === col - 1) {
+              direction = [0, 1];
+            } else {
+              direction = [0, -1];
+            }
           }
+          break;
         }
       }
+    }
+
+    return `Ray stuck in an infinite loop at (${row}, ${col})`;
+  };
+
+  const validateMarkers = () => {
+    let correctMarkers = 0;
+    let totalAtoms = 0;
+
+    grid.forEach((row) => {
+      row.forEach((cell) => {
+        if (cell.type === 'atomMarker') {
+          if (cell.atom) totalAtoms++;
+          if (cell.atom && cell.marker) {
+            correctMarkers++;
+          }
+        }
+      });
+    });
+
+    if (correctMarkers === totalAtoms && totalAtoms > 0) {
+      setValidationResult('All atoms found! You win!');
+    } else {
+      setValidationResult(
+        `${correctMarkers} out of ${totalAtoms} atoms found.`
+      );
     }
   };
 
@@ -143,6 +214,8 @@ export default function GridGeneration() {
         </button>
         <p>Atoms placed: {atomCount} / 5</p>
         {rayResult && <p>{rayResult}</p>}
+        {validationResult && <p>{validationResult}</p>}
+        <button onClick={validateMarkers}>Validate</button>
       </div>
       <div className='border border-gray-700 p-4 flex flex-col gap-2 rounded-md bg-gray-100'>
         {grid.map((row, rowIndex) => (
@@ -166,7 +239,15 @@ export default function GridGeneration() {
                   )}
                   key={colIndex}
                 >
-                  {isLaser ? cell.number : hasAtom ? 'A' : hasMarker ? 'M' : ''}
+                  {isLaser
+                    ? cell.number
+                    : hasMarker
+                    ? 'M'
+                    : hasMarker && shootMode
+                    ? 'M'
+                    : hasAtom
+                    ? 'A'
+                    : ''}
                 </div>
               );
             })}
