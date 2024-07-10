@@ -1,9 +1,10 @@
 'use client';
 
 import { loadGameState, saveGameState } from '@/app/actions';
-import { AtomMarkerCell, Cell, GridWithLasers } from '@/app/types';
-import { GRID_SIZE, cn } from '@/lib/utils';
+import { AtomMarkerCell, GridWithLasers, LaserCell } from '@/app/types';
+import { GRID_SIZE, cn, isRayReflected } from '@/lib/utils';
 import { useEffect, useState } from 'react';
+import { Button } from './ui/button';
 
 export default function GridGeneration() {
   const [grid, setGrid] = useState<GridWithLasers>([]);
@@ -99,6 +100,14 @@ export default function GridGeneration() {
     }
   };
 
+  // const getLaserNumber = (row: number, col: number): number | null => {
+  //   if (row === 0) return (grid[row][col] as LaserCell).number; // Haut
+  //   if (row === GRID_SIZE + 1) return col; // Bas
+  //   if (col === 0) return GRID_SIZE + 1 + row; // Gauche
+  //   if (col === GRID_SIZE + 1) return GRID_SIZE + 1 + row; // Droite
+  //   return null;
+  // };
+
   const shootRay = (startRow: number, startCol: number): string => {
     let row = startRow;
     let col = startCol;
@@ -112,29 +121,63 @@ export default function GridGeneration() {
     const MAX_STEPS = GRID_SIZE * 4; // Limite le nombre de pas pour éviter une boucle infinie
     let steps = 0;
 
+    const isAdjacentToEdge = (r: number, c: number) =>
+      (r === 1 && startRow === 0) ||
+      (r === GRID_SIZE && startRow === GRID_SIZE + 1) ||
+      (c === 1 && startCol === 0) ||
+      (c === GRID_SIZE && startCol === GRID_SIZE + 1);
+
+    const adjacentCells = [
+      [row - 1, col + 1], // Haut
+      [row + 1, col - 1], // Bas
+      [row - 1, col - 1], // Gauche
+      [row + 1, col + 1], // Droite
+    ];
+
+    for (const [adjRow, adjCol] of adjacentCells) {
+      if (
+        adjRow >= 0 &&
+        adjRow <= GRID_SIZE + 1 &&
+        adjCol >= 0 &&
+        adjCol <= GRID_SIZE + 1 &&
+        grid[adjRow][adjCol].type === 'atomMarker' &&
+        (grid[adjRow][adjCol] as AtomMarkerCell).atom &&
+        isAdjacentToEdge(adjRow, adjCol)
+      ) {
+        return `Reflected back`;
+      }
+    }
+
     while (steps < MAX_STEPS) {
       row += direction[0];
       col += direction[1];
       steps += 1;
 
-      if (row < 0 || row > GRID_SIZE + 1 || col < 0 || col > GRID_SIZE + 1) {
-        return `Ray exited at (${row}, ${col})`;
+      if (
+        row <= 0 ||
+        row >= GRID_SIZE + 1 ||
+        col <= 0 ||
+        col >= GRID_SIZE + 1
+      ) {
+        return `Ray exited at laser ${(grid[row][col] as LaserCell).number}`;
       }
 
       const cell = grid[row][col];
       if (cell.type === 'atomMarker' && cell.atom) {
-        return `Ray reflected back at (${startRow}, ${startCol})`;
+        // return `Ray reflected back at (${startRow}, ${startCol})`;
+        return 'HIT';
       }
 
       // Vérifier la présence d'atomes adjacents pour dévier le rayon
       const adjacentCells = [
-        { pos: [row - 1, col + 1], dir: [-1, 0] }, // Haut
-        { pos: [row + 1, col - 1], dir: [1, 0] }, // Bas
-        { pos: [row - 1, col - 1], dir: [0, 1] }, // Gauche
-        { pos: [row + 1, col + 1], dir: [0, -1] }, // Droite
+        [row - 1, col + 1], // Haut
+        [row + 1, col - 1], // Bas
+        [row - 1, col - 1], // Gauche
+        [row + 1, col + 1], // Droite
       ];
 
-      for (const { pos, dir } of adjacentCells) {
+      let adjacentAtoms = 0;
+      for (const pos of adjacentCells) {
         const [adjRow, adjCol] = pos;
         if (
           adjRow >= 0 &&
@@ -144,39 +187,63 @@ export default function GridGeneration() {
           grid[adjRow][adjCol].type === 'atomMarker' &&
           (grid[adjRow][adjCol] as AtomMarkerCell).atom
         ) {
-          // Modifier la direction du rayon de 90° en fonction de la position de l'atome adjacent
-          if (direction[0] === 0 && direction[1] === 1) {
-            // vers la droite
-            if (adjRow === row + 1) {
-              direction = [-1, 0];
-            } else {
-              direction = [1, 0];
-            }
-          } else if (direction[0] === 1 && direction[1] === 0) {
-            // vers le bas
-            if (adjCol === col + 1) {
-              direction = [0, -1];
-            } else {
-              direction = [0, 1];
-            }
-          } else if (direction[0] === 0 && direction[1] === -1) {
-            // vers la gauche
-            if (adjRow === row - 1) {
-              direction = [1, 0];
-            } else {
-              direction = [-1, 0];
-            }
-          } else if (direction[0] === -1 && direction[1] === 0) {
-            // vers le haut
-            if (adjCol === col - 1) {
-              direction = [0, 1];
-            } else {
-              direction = [0, -1];
-            }
-          }
-          break;
+          adjacentAtoms++;
         }
       }
+
+      // Inverser la direction si deux atomes adjacents sont trouvés
+      if (adjacentAtoms >= 2) {
+        // direction = [-direction[0], -direction[1]];
+        return 'Double Deflection';
+      } else {
+        // Continuer de dévier le rayon si un seul atome adjacent est trouvé
+        for (const pos of adjacentCells) {
+          const [adjRow, adjCol] = pos;
+          if (
+            adjRow >= 0 &&
+            adjRow <= GRID_SIZE + 1 &&
+            adjCol >= 0 &&
+            adjCol <= GRID_SIZE + 1 &&
+            grid[adjRow][adjCol].type === 'atomMarker' &&
+            (grid[adjRow][adjCol] as AtomMarkerCell).atom
+          ) {
+            if (direction[0] === 0 && direction[1] === 1) {
+              // vers la droite
+              if (adjRow === row + 1) {
+                direction = [-1, 0];
+              } else {
+                direction = [1, 0];
+              }
+            } else if (direction[0] === 1 && direction[1] === 0) {
+              // vers le bas
+              if (adjCol === col + 1) {
+                direction = [0, -1];
+              } else {
+                direction = [0, 1];
+              }
+            } else if (direction[0] === 0 && direction[1] === -1) {
+              // vers la gauche
+              if (adjRow === row - 1) {
+                direction = [1, 0];
+              } else {
+                direction = [-1, 0];
+              }
+            } else if (direction[0] === -1 && direction[1] === 0) {
+              // vers le haut
+              if (adjCol === col - 1) {
+                direction = [0, 1];
+              } else {
+                direction = [0, -1];
+              }
+            }
+            break;
+          }
+        }
+      }
+
+      // if (isRayReflected(row, col, grid)) {
+      //   return `Ray reflected back`;
+      // }
     }
 
     return `Ray stuck in an infinite loop at (${row}, ${col})`;
@@ -206,20 +273,76 @@ export default function GridGeneration() {
     }
   };
 
+  const placeAtomsRandomly = () => {
+    const newGrid = grid.map((row) =>
+      row.map((cell) =>
+        cell.type === 'atomMarker' ? { ...cell, atom: false } : cell
+      )
+    );
+
+    let placedAtoms = 0;
+    while (placedAtoms < 5) {
+      const randomRow = Math.floor(Math.random() * GRID_SIZE) + 1;
+      const randomCol = Math.floor(Math.random() * GRID_SIZE) + 1;
+
+      if (!(newGrid[randomRow][randomCol] as AtomMarkerCell).atom) {
+        newGrid[randomRow][randomCol] = {
+          ...newGrid[randomRow][randomCol],
+          atom: true,
+        } as AtomMarkerCell;
+        placedAtoms++;
+      }
+    }
+
+    setGrid(newGrid);
+    setAtomCount(5);
+    saveGameState(newGrid);
+    setShootMode(true);
+  };
+
+  const resetGame = () => {
+    const emptyGrid = grid.map((row) =>
+      row.map((cell) => {
+        if (cell.type === 'laser') {
+          return { ...cell, used: false };
+        } else if (cell.type === 'atomMarker') {
+          return { ...cell, atom: false, marker: false };
+        }
+        return cell;
+      })
+    );
+
+    setGrid(emptyGrid);
+    setAtomCount(0);
+    setMarkerCount(0);
+    setRayResult(null);
+    setValidationResult(null);
+    saveGameState(emptyGrid);
+  };
+
   return (
     <>
-      <div>
-        <button onClick={() => setShootMode(!shootMode)}>
+      <div className='flex flex-col gap-2 justify-center'>
+        <Button onClick={placeAtomsRandomly}>Start Solo Game</Button>
+        <Button variant='ghost' onClick={() => setShootMode(!shootMode)}>
           {shootMode ? 'Switch to Place Atoms' : 'Switch to Shoot Rays'}
-        </button>
-        <p>Atoms placed: {atomCount} / 5</p>
-        {rayResult && <p>{rayResult}</p>}
-        {validationResult && <p>{validationResult}</p>}
-        <button onClick={validateMarkers}>Validate</button>
+        </Button>
+        <Button variant='ghost' onClick={resetGame}>
+          Reset Game
+        </Button>{' '}
+        {/* Nouveau bouton de réinitialisation */}
+        <div className='flex w-full gap-2 items-center justify-between'>
+          <p>Atoms placed: {atomCount} / 5</p>
+          {rayResult && <p>{rayResult}</p>}
+          {validationResult && <p>{validationResult}</p>}
+          <Button variant='secondary' onClick={validateMarkers}>
+            Validate
+          </Button>
+        </div>
       </div>
-      <div className='border border-gray-700 p-4 flex flex-col gap-2 rounded-md bg-gray-100'>
+      <div className='p-4 flex flex-col gap-2 rounded-md'>
         {grid.map((row, rowIndex) => (
-          <div key={rowIndex} className='flex gap-2 bg-green-300'>
+          <div key={rowIndex} className='flex gap-2'>
             {row.map((cell, colIndex) => {
               const isLaser = cell.type === 'laser' && cell.number !== null;
               const used = cell.type === 'laser' && cell.used;
